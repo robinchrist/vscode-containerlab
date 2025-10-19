@@ -129,6 +129,7 @@ class TopologyWebviewController {
   private labLocked = true;
   private currentMode: 'edit' | 'view' = 'edit';
   private pendingMultipleLinkCount: number = 1;
+  private lastMultipleLinkCount: number = 2; // Remember last value entered in Multiple Links dialog
   private edgeIdCounter: number = 0;
   private nodeMenu: any;
   private edgeMenu: any;
@@ -1119,7 +1120,8 @@ class TopologyWebviewController {
     const commands = [
       this.createEditCommand(isNetwork),
       this.createDeleteCommand(),
-      this.createAddLinkCommand()
+      this.createAddLinkCommand(),
+      this.createAddMultipleLinksCommand()
     ];
     if (ele.isNode() && ele.parent().nonempty()) {
       commands.push(this.createReleaseFromGroupCommand());
@@ -1168,6 +1170,14 @@ class TopologyWebviewController {
 
   private createAddLinkCommand(): any {
     return this.createNodeMenuItem('fas fa-link', 'Add Link', (node) => {
+      // Legacy single link creation - directly start edge handler
+      this.isEdgeHandlerActive = true;
+      this.eh.start(node);
+    });
+  }
+
+  private createAddMultipleLinksCommand(): any {
+    return this.createNodeMenuItem('fas fa-project-diagram', 'Multiple Links', (node) => {
       this.showMultipleLinkPrompt(node);
     });
   }
@@ -1226,7 +1236,7 @@ class TopologyWebviewController {
     input.type = 'number';
     input.min = '1';
     input.max = '100';
-    input.value = '1';
+    input.value = this.lastMultipleLinkCount.toString();
     input.style.cssText = `
       width: 100%;
       padding: 6px 8px;
@@ -1283,6 +1293,7 @@ class TopologyWebviewController {
       const count = parseInt(input.value, 10);
       if (Number.isInteger(count) && count > 0 && count <= 100) {
         this.pendingMultipleLinkCount = count;
+        this.lastMultipleLinkCount = count; // Remember the value for next time
         document.body.removeChild(overlay);
         // Start edge handler
         this.isEdgeHandlerActive = true;

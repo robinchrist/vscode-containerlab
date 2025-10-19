@@ -128,6 +128,8 @@ class TopologyWebviewController {
   private interfacePatternCache: Map<string, ReturnType<typeof parseInterfacePattern>> = new Map();
   private labLocked = true;
   private currentMode: 'edit' | 'view' = 'edit';
+  private pendingMultipleLinkCount: number = 1;
+  private edgeIdCounter: number = 0;
   private nodeMenu: any;
   private edgeMenu: any;
   private groupMenu: any;
@@ -1166,9 +1168,159 @@ class TopologyWebviewController {
 
   private createAddLinkCommand(): any {
     return this.createNodeMenuItem('fas fa-link', 'Add Link', (node) => {
-      this.isEdgeHandlerActive = true;
-      this.eh.start(node);
+      this.showMultipleLinkPrompt(node);
     });
+  }
+
+  /**
+   * Shows a prompt dialog asking the user how many links to create
+   * @param sourceNode The source node from which to create links
+   */
+  private showMultipleLinkPrompt(sourceNode: cytoscape.NodeSingular): void {
+    // Create dialog overlay
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    `;
+
+    // Create dialog container
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      padding: 20px;
+      min-width: 300px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    `;
+
+    // Create title
+    const title = document.createElement('h3');
+    title.textContent = 'Create Multiple Links';
+    title.style.cssText = `
+      margin: 0 0 15px 0;
+      color: var(--vscode-foreground);
+      font-size: 14px;
+    `;
+
+    // Create description
+    const description = document.createElement('p');
+    description.textContent = 'How many links would you like to create between nodes?';
+    description.style.cssText = `
+      margin: 0 0 15px 0;
+      color: var(--vscode-descriptionForeground);
+      font-size: 12px;
+    `;
+
+    // Create input
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '1';
+    input.max = '100';
+    input.value = '1';
+    input.style.cssText = `
+      width: 100%;
+      padding: 6px 8px;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 2px;
+      font-size: 13px;
+      box-sizing: border-box;
+      margin-bottom: 15px;
+    `;
+
+    // Create button container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = `
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    `;
+
+    // Create Cancel button
+    const cancelButton = document.createElement('button');
+    cancelButton.textContent = 'Cancel';
+    cancelButton.style.cssText = `
+      padding: 6px 14px;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      border: none;
+      border-radius: 2px;
+      cursor: pointer;
+      font-size: 13px;
+    `;
+
+    // Create OK button
+    const okButton = document.createElement('button');
+    okButton.textContent = 'OK';
+    okButton.style.cssText = `
+      padding: 6px 14px;
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+      border-radius: 2px;
+      cursor: pointer;
+      font-size: 13px;
+    `;
+
+    // Handle cancel
+    const handleCancel = () => {
+      document.body.removeChild(overlay);
+    };
+
+    // Handle OK
+    const handleOk = () => {
+      const count = parseInt(input.value, 10);
+      if (count > 0 && count <= 100) {
+        this.pendingMultipleLinkCount = count;
+        document.body.removeChild(overlay);
+        // Start edge handler
+        this.isEdgeHandlerActive = true;
+        this.eh.start(sourceNode);
+      }
+    };
+
+    // Event listeners
+    cancelButton.addEventListener('click', handleCancel);
+    okButton.addEventListener('click', handleOk);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        handleCancel();
+      }
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        handleOk();
+      } else if (e.key === 'Escape') {
+        handleCancel();
+      }
+    });
+
+    // Assemble dialog
+    buttonContainer.appendChild(cancelButton);
+    buttonContainer.appendChild(okButton);
+    dialog.appendChild(title);
+    dialog.appendChild(description);
+    dialog.appendChild(input);
+    dialog.appendChild(buttonContainer);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    // Focus input and select default value
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
   }
 
   private createReleaseFromGroupCommand(): any {
@@ -1764,11 +1916,53 @@ class TopologyWebviewController {
     setTimeout(() => {
       this.isEdgeHandlerActive = false;
     }, 100);
+
+    // Handle the first edge that was just created by edgehandles
     const sourceEndpoint = this.getNextEndpoint(sourceNode.id());
     const targetEndpoint = this.getNextEndpoint(targetNode.id());
     const edgeData: any = { sourceEndpoint, targetEndpoint, editor: 'true' };
     this.addNetworkEdgeProperties(sourceNode, targetNode, addedEdge, edgeData);
     addedEdge.data(edgeData);
+
+    // Create additional edges if multiple links were requested
+    const linksToCreate = this.pendingMultipleLinkCount - 1; // -1 because one was already created
+    for (let i = 0; i < linksToCreate; i++) {
+      this.createAdditionalEdge(sourceNode, targetNode);
+    }
+
+    // Reset the counter for next time
+    this.pendingMultipleLinkCount = 1;
+  }
+
+  /**
+   * Creates an additional edge between two nodes with sequential interface names
+   * @param sourceNode Source node
+   * @param targetNode Target node
+   */
+  private createAdditionalEdge(sourceNode: cytoscape.NodeSingular, targetNode: cytoscape.NodeSingular): void {
+    const sourceEndpoint = this.getNextEndpoint(sourceNode.id());
+    const targetEndpoint = this.getNextEndpoint(targetNode.id());
+
+    // Generate unique ID using counter and timestamp
+    this.edgeIdCounter++;
+    const edgeData: any = {
+      id: `${sourceNode.id()}-${targetNode.id()}-${Date.now()}-${this.edgeIdCounter}`,
+      source: sourceNode.id(),
+      target: targetNode.id(),
+      sourceEndpoint,
+      targetEndpoint,
+      editor: 'true'
+    };
+
+    // Add the edge to the graph
+    const newEdge = this.cy.add({
+      group: 'edges',
+      data: edgeData
+    });
+
+    // Apply network properties if needed
+    this.addNetworkEdgeProperties(sourceNode, targetNode, newEdge, edgeData);
+    newEdge.data(edgeData);
   }
 
   private addNetworkEdgeProperties(sourceNode: cytoscape.NodeSingular, targetNode: cytoscape.NodeSingular, addedEdge: cytoscape.EdgeSingular, edgeData: any): void {

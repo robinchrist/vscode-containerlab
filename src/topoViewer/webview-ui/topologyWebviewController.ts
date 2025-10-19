@@ -1281,7 +1281,7 @@ class TopologyWebviewController {
     // Handle OK
     const handleOk = () => {
       const count = parseInt(input.value, 10);
-      if (count > 0 && count <= 100) {
+      if (!isNaN(count) && count > 0 && count <= 100) {
         this.pendingMultipleLinkCount = count;
         document.body.removeChild(overlay);
         // Start edge handler
@@ -1316,11 +1316,11 @@ class TopologyWebviewController {
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
 
-    // Focus input and select default value
-    setTimeout(() => {
+    // Focus input and select default value after DOM is ready
+    window.requestAnimationFrame(() => {
       input.focus();
       input.select();
-    }, 0);
+    });
   }
 
   private createReleaseFromGroupCommand(): any {
